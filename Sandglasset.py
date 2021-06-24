@@ -9,6 +9,15 @@ from torch.autograd import Variable
 import math
 from torch.nn.modules.activation import MultiheadAttention
 
+"""
+first edition:2021.6.24
+author:wxj
+
+issue source:YoungloLee
+issue1:do not share the same block
+issue2:control the size of parameters,we should use depth-wise convolution
+"""
+
 
 # ------------------------------------------------over_lap_and_add----------------------------------------
 def overlap_and_add(signal, frame_step):
@@ -185,7 +194,7 @@ class Sandglasset_block(nn.Module):
         local_rnn_out = self.local_rnn(input)
         dowm_sample_out, pad_value = self.down_sample(local_rnn_out)
         global_san_out = self.global_SAN(dowm_sample_out)
-        up_sample_out = self.up_sample(global_san_out,pad_value)
+        up_sample_out = self.up_sample(global_san_out, pad_value)
         return up_sample_out
 
 
@@ -241,9 +250,15 @@ class Down_sample(nn.Module):
         self.kernel_size = kernel_size
         self.stride = self.kernel_size
         self.feature_dim = feature_dim
+        # YoungloLee issue2:depth-wise convolution
+        # modify after
         self.conv_layer = nn.Conv1d(self.feature_dim, self.feature_dim,
                                     kernel_size=self.kernel_size,
-                                    stride=self.stride)
+                                    stride=self.stride, groups=self.feature_dim)
+        # modify before
+        # self.conv_layer = nn.Conv1d(self.feature_dim, self.feature_dim,
+        #                             kernel_size=self.kernel_size,
+        #                             stride=self.stride)
 
     def forward(self, input):
         # [B,D,L,K]
@@ -299,9 +314,11 @@ class Up_sample(nn.Module):
         self.stride = self.kernel_size
         self.feature_dim = feature_dim
         self.segment_length = segment_length
+        # YoungloLee issue2:depth-wise convolution
+        # modify after
         self.conv_layer = nn.ConvTranspose1d(self.feature_dim, self.feature_dim,
                                              kernel_size=self.kernel_size,
-                                             stride=self.stride)
+                                             stride=self.stride, groups=self.feature_dim)
 
     def forward(self, input, pad_value):
         # [B*L,D,M]
@@ -417,21 +434,56 @@ class Sandglasset(nn.Module):
 
         self.encoder = Encoder(feature_dim=self.feature_dim)
         self.segmentation = Segmentation_Module(segment_size=self.segment_size)
-        self.sandglass_block_1_6 = Sandglasset_block(feature_dim=self.feature_dim,
-                                                     hidden_size=self.hidden_size,
-                                                     num_layer=self.num_layer,
-                                                     kernel_size=4 ** 1,
-                                                     segment_size=self.segment_size)
-        self.sandglass_block_2_5 = Sandglasset_block(feature_dim=self.feature_dim,
-                                                     hidden_size=self.hidden_size,
-                                                     num_layer=self.num_layer,
-                                                     kernel_size=4 ** 2,
-                                                     segment_size=self.segment_size)
-        self.sandglass_block_3_4 = Sandglasset_block(feature_dim=self.feature_dim,
-                                                     hidden_size=self.hidden_size,
-                                                     num_layer=self.num_layer,
-                                                     kernel_size=4 ** 3,
-                                                     segment_size=self.segment_size)
+        # YoungloLee issue2: we should try not to share the same block
+        # modify before
+        # self.sandglass_block_1_6 = Sandglasset_block(feature_dim=self.feature_dim,
+        #                                              hidden_size=self.hidden_size,
+        #                                              num_layer=self.num_layer,
+        #                                              kernel_size=4 ** 1,
+        #                                              segment_size=self.segment_size)
+        # self.sandglass_block_2_5 = Sandglasset_block(feature_dim=self.feature_dim,
+        #                                              hidden_size=self.hidden_size,
+        #                                              num_layer=self.num_layer,
+        #                                              kernel_size=4 ** 2,
+        #                                              segment_size=self.segment_size)
+        # self.sandglass_block_3_4 = Sandglasset_block(feature_dim=self.feature_dim,
+        #                                              hidden_size=self.hidden_size,
+        #                                              num_layer=self.num_layer,
+        #                                              kernel_size=4 ** 3,
+        #                                              segment_size=self.segment_size)
+
+        # modify after
+        self.sandglass_block_1 = Sandglasset_block(feature_dim=self.feature_dim,
+                                                   hidden_size=self.hidden_size,
+                                                   num_layer=self.num_layer,
+                                                   kernel_size=4 ** 1,
+                                                   segment_size=self.segment_size)
+        self.sandglass_block_6 = Sandglasset_block(feature_dim=self.feature_dim,
+                                                   hidden_size=self.hidden_size,
+                                                   num_layer=self.num_layer,
+                                                   kernel_size=4 ** 1,
+                                                   segment_size=self.segment_size)
+        self.sandglass_block_2 = Sandglasset_block(feature_dim=self.feature_dim,
+                                                   hidden_size=self.hidden_size,
+                                                   num_layer=self.num_layer,
+                                                   kernel_size=4 ** 2,
+                                                   segment_size=self.segment_size)
+        self.sandglass_block_5 = Sandglasset_block(feature_dim=self.feature_dim,
+                                                   hidden_size=self.hidden_size,
+                                                   num_layer=self.num_layer,
+                                                   kernel_size=4 ** 2,
+                                                   segment_size=self.segment_size)
+        self.sandglass_block_3 = Sandglasset_block(feature_dim=self.feature_dim,
+                                                   hidden_size=self.hidden_size,
+                                                   num_layer=self.num_layer,
+                                                   kernel_size=4 ** 3,
+                                                   segment_size=self.segment_size)
+        self.sandglass_block_4 = Sandglasset_block(feature_dim=self.feature_dim,
+                                                   hidden_size=self.hidden_size,
+                                                   num_layer=self.num_layer,
+                                                   kernel_size=4 ** 3,
+                                                   segment_size=self.segment_size)
+
         self.est_mask = Est_mask(feature_dim=self.feature_dim, segment_size=self.segment_size,
                                  nspk=self.nspk)
         self.decoder = Decoder(basic_signal=self.basic_signal, feature_dim=self.feature_dim)
@@ -461,21 +513,21 @@ class Sandglasset(nn.Module):
     def forward(self, input):
         encoder_out = self.encoder(input)
         segment_out, rest = self.segmentation(encoder_out)
-        out1 = self.sandglass_block_1_6(segment_out)
-        # print("block_1_6 out:{}".format(out1.shape))
-        out2 = self.sandglass_block_2_5(out1)
-        # print("block_2_5 out:{}".format(out2.shape))
-        out3 = self.sandglass_block_3_4(out2)
-        # print("block_3_4 out:{}".format(out3.shape))
-        out4 = self.sandglass_block_3_4(out3)
+        out1 = self.sandglass_block_1(segment_out)
+        # print("block_1 out:{}".format(out1.shape))
+        out2 = self.sandglass_block_2(out1)
+        # print("block_2 out:{}".format(out2.shape))
+        out3 = self.sandglass_block_3(out2)
+        # print("block_3 out:{}".format(out3.shape))
+        out4 = self.sandglass_block_4(out3)
         out4 = out4 + out3
-        # print("block_3_4 out:{}".format(out4.shape))
-        out5 = self.sandglass_block_2_5(out4)
+        # print("block_4 out:{}".format(out4.shape))
+        out5 = self.sandglass_block_5(out4)
         out5 = out5 + out2
-        # print("block_2_5 out:{}".format(out5.shape))
-        out6 = self.sandglass_block_1_6(out5)
+        # print("block_5 out:{}".format(out5.shape))
+        out6 = self.sandglass_block_6(out5)
         out6 = out6 + out1
-        # print("block_1_6 out:{}".format(out6.shape))
+        # print("block_6 out:{}".format(out6.shape))
         est_mask = self.est_mask(out6, rest)
         est_src = self.decoder(encoder_out, est_mask)
         return est_src
@@ -501,7 +553,7 @@ class Sandglasset(nn.Module):
     def load_model_from_package(cls, package):
         model = cls(package['nspk'], package['feature_dim'],
                     package['hidden_size'], package['num_layer'],
-                    bidirectional=package['segment_size'])
+                    segment_size=package['segment_size'])
         model.load_state_dict(package['state_dict'])
         return model
 
@@ -524,8 +576,9 @@ class Sandglasset(nn.Module):
             package['cv_loss'] = cv_loss
         return package
 
+
 if __name__ == "__main__":
-    sandglass = Sandglasset(feature_dim=32,nspk=2, hidden_size=20, num_layer=3,
+    sandglass = Sandglasset(feature_dim=32, nspk=2, hidden_size=20, num_layer=3,
                             segment_size=256)
     encoder = Encoder(feature_dim=64)
     input = torch.zeros(1, 70000)
